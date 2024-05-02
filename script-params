@@ -1,0 +1,4 @@
+IMAGE=./images/jammy
+DEV=/dev/nbd0
+MNT=./images/mnt
+MODULE=~/comp630-s24/assignments/final/630hax.ko
