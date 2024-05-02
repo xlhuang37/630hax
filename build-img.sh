@@ -4,13 +4,17 @@ set -e
 
 . ./script-params
 
-qemu-img create -f qcow2 ${IMAGE}.img 4G
-
-sudo modprobe nbd
-sudo qemu-nbd -f qcow2 -c ${DEV} ${IMAGE}.img
-sudo mkfs.ext4 ${DEV}
+if ! lsmod | grep nbd; then
+   echo "Please ask an administator to load the nbd kernel extension.\n"
+   exit 0
+fi
 
 mkdir -p images/mnt
+
+qemu-img create -f qcow2 ${IMAGE}.img 4G
+
+sudo qemu-nbd -f qcow2 -c ${DEV} ${IMAGE}.img
+sudo mkfs.ext4 ${DEV}
 
 sudo mount ${DEV} ${MNT}
 
