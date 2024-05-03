@@ -4,7 +4,7 @@
 
 ./mount-img.sh
 
-sudo cp ${MODULE} ${MNT}/root/
-sudo cp pid_test ${MNT}/root/
+cp ${MODULE} ${MNT}/root/
+cp pid_test ${MNT}/root/
 
 ./umount-img.sh
