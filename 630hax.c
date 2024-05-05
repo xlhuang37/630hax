@@ -32,7 +32,6 @@ struct sorted_node {
 static struct proc_dir_entry * running_total_entry;
 static struct proc_dir_entry * sorted_list_entry;
 static struct proc_dir_entry * my_pid_entry;
-
 /**
  * Hook to read the running total.
  *
@@ -69,7 +68,6 @@ static ssize_t proc_running_total_read(struct file *filp, char __user *buffer,
 	if (*offp) return 0;
 
 	// Exercise 1: Your code here
-	// OK, so I think when you use lock, some functions simply cannot be used. That is why I was getting no results;
 	spin_lock(&state_lock);
 	int64_t local_total = total;
 	spin_unlock(&state_lock);
@@ -84,7 +82,7 @@ static ssize_t proc_running_total_read(struct file *filp, char __user *buffer,
 	// if(ret) { 
 	// 	return ret;
 	// }
-		
+
 	*offp = 1; // Assuming it always finishes in one call. What if it does not? I don't care!
 	kfree(kern_buffer);
 	return num_bytes;
@@ -180,9 +178,34 @@ static ssize_t proc_sorted_list_read(struct file *filp, char __user *buffer,
 				     size_t count, loff_t *offp)
 {
 	size_t my_count = 0;
+	int ret;
 
 	// Signal EOF if the offset is not zero
 	if (*offp) return 0;
+	spin_lock(&state_lock);
+	
+	struct sorted_node* curr_node;
+	char* kern_buffer = kmalloc(KERN_BUFFER_MAX, GFP_KERNEL);
+	// list_for_each_entry starts at the the entry pointed to by the supplied list_head
+	list_for_each_entry(curr_node, sorted_list_head, member) {
+		int local_total = curr_node->val;
+		
+		num_bytes = sprintf(kern_buffer, "%lld\n", local_total);
+
+		my_count += num_bytes;
+		if(my_count > count) {
+			num_bytes = my_count - count;
+			ret = copy_to_user(buffer, kern_buffer, num_bytes);
+			break;
+		}
+	
+		ret = copy_to_user(buffer, kern_buffer, num_bytes);
+	}
+	kfree(kern_buffer);
+	
+	spin_unlock(&state_lock);
+	*offp = 1;
+	return my_count;
 
 	// Exercise 2: Your code here.
 	//
@@ -194,8 +217,6 @@ static ssize_t proc_sorted_list_read(struct file *filp, char __user *buffer,
 	// such as list_for_each_entry().
 	//
 	// As before, be cognizant of concurrency and use a lock
-
-	return my_count;
 }
 
 /**
@@ -231,6 +252,20 @@ static ssize_t proc_sorted_list_write(struct file *file,
 	// Signal EOF if the offset is not zero
 	if (*offp) return 0;
 
+	spin_lock(&state_lock);
+	
+	struct sorted_node* curr_node;
+	char* kern_buffer = kmalloc(KERN_BUFFER_MAX, GFP_KERNEL);
+	// list_for_each_entry starts at the the entry pointed to by the supplied list_head
+	list_for_each_entry(curr_node, sorted_list_head, member) {
+		int curr_val = curr_node->val;
+		if(curr_val > )
+	}
+	kfree(kern_buffer);
+	
+	spin_unlock(&state_lock);
+	*offp = 1;
+	return count;
 	// Exercise 2: Your code here.
 	//
 	// Much of the code from proc_running_total_write() can be
@@ -242,8 +277,6 @@ static ssize_t proc_sorted_list_write(struct file *file,
 	// such as list_for_each_entry() and list_add_tail().
 	//
 	// As before, be cognizant of concurrency and use a lock
-
-	return count;
 }
 
 /* Helper code borrowed form Linux because it is not exported as a
