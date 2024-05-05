@@ -18,6 +18,7 @@ MODULE_LICENSE("Dual BSD/GPL");
 #define RUNNING_TOTAL_PROC_NAME "running_total"
 #define SORTED_LIST_PROC_NAME "sorted_list"
 #define MY_PID_PROC_NAME "my_piddo"
+#define KERN_BUFFER_MAX 22 // 2^64 has 20 digits, 1 for null terminator, 1 for new line
 
 /* Some suggested state/data structures. */
 static spinlock_t state_lock;
@@ -31,7 +32,6 @@ struct sorted_node {
 static struct proc_dir_entry * running_total_entry;
 static struct proc_dir_entry * sorted_list_entry;
 static struct proc_dir_entry * my_pid_entry;
-
 
 /**
  * Hook to read the running total.
@@ -53,27 +53,41 @@ static ssize_t proc_running_total_read(struct file *filp, char __user *buffer,
 				       size_t count, loff_t *offp)
 {
 	int ret = 0;
+	int num_bytes;
 
 	// Signal end-of-file (EOF) if the offset is not zero
 	// This is a little hacky, since we are assuming we will always
 	// be able to return the entire contents of the "file" in one read()
 	// system call.  This is true for a single number, but may not be
 	// true in general.
+
+	// It seems that we are assuming that every time we call cat, the offp argument will always be 0?
+	// This makes sense if cat supplies its own offset variable and it starts reading at 0.
+	// Every time cat calls read, the offset will be updated.
+	// Just that in our case, we only allow it to read one time no matter what.
+	// ASK IN OFFICE HOUR
 	if (*offp) return 0;
 
 	// Exercise 1: Your code here
+	// OK, so I think when you use lock, some functions simply cannot be used. That is why I was getting no results;
+	spin_lock(&state_lock);
+	int64_t local_total = total;
+	spin_unlock(&state_lock);
 
-	// First, you should write the total into a kernel buffer,
-	// as a string - not the binary value of the integer.
-	// Don't forget to use a lock to protect the count!
-	// Finally, you may find kfree() and kmalloc() helpful.
-
-	// Then, use copy_to_user to copy the contents of
-	// the buffer to the user-provided buffer.  In general,
-	// kernel code ought not work directly on user memory,
-	// which could be a bad pointer or changed by another user thread.
-
-	return ret;
+	char* kern_buffer = kmalloc(KERN_BUFFER_MAX, GFP_KERNEL);
+	num_bytes = sprintf(kern_buffer, "%lld\n", local_total);
+	// if(num_bytes < 0) {
+	// 	return num_bytes;
+	// }
+		
+	ret = copy_to_user(buffer, kern_buffer, num_bytes);
+	// if(ret) { 
+	// 	return ret;
+	// }
+		
+	*offp = 1; // Assuming it always finishes in one call. What if it does not? I don't care!
+	kfree(kern_buffer);
+	return num_bytes;
 }
 
 /**
@@ -104,6 +118,8 @@ static ssize_t proc_running_total_write(struct file *file,
 					size_t count, loff_t *offp)
 {
 	// Signal EOF if the offset is not zero
+	// This is different from cat. We have to return count because echo gonna keep calling write until we return count.
+	// Which has to relate to the logic how this pipe writing works.
 	if (*offp) return 0;
 
 	// Exercise 1: Your code here:
@@ -116,6 +132,24 @@ static ssize_t proc_running_total_write(struct file *file,
 
 	// Here we can assume that, in the absence of errors,
 	// we consume all the bytes written in one call.
+	// Then, use copy_to_user to copy the contents of
+	// the buffer to the user-provided buffer.  In general,
+	// kernel code ought not work directly on user memory,
+	// which could be a bad pointer or changed by another user thread.
+	char* kern_buffer_user = kmalloc(KERN_BUFFER_MAX, GFP_KERNEL);
+	int ret = copy_from_user(kern_buffer_user, buffer, count);
+	if(ret < 0)
+		;
+
+	int64_t user_num;
+	sscanf(kern_buffer_user, "%lld", &user_num);
+
+	spin_lock(&state_lock);
+	total = user_num + total;
+	spin_unlock(&state_lock);
+
+	*offp = 1;
+	kfree(kern_buffer_user);
 	return count;
 }
 

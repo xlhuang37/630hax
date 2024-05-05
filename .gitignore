@@ -10,3 +10,7 @@ linux-*
 images/
 pid_test
 *~
+*.raw
+*.tar.xz
+*.symvers
+*.order
