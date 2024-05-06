@@ -24,6 +24,7 @@ MODULE_LICENSE("Dual BSD/GPL");
 static spinlock_t state_lock;
 static int64_t total = 0;
 static struct list_head sorted_list_head;
+struct list_head* curr_list_head = NULL;
 struct sorted_node {
   int64_t val;
   struct list_head list;
@@ -183,21 +184,21 @@ static ssize_t proc_sorted_list_read(struct file *filp, char __user *buffer,
 
 	// Signal EOF if the offset is not zero
 	if (*offp) return 0;
+
 	// Outside such that no atomic problem
 	char* kern_buffer = kmalloc(KERN_BUFFER_MAX, GFP_KERNEL);
 	// spin_lock(&state_lock);
 	struct sorted_node* curr_node;
 	// list_for_each_entry starts at the the entry pointed to by the supplied list_head
 	list_for_each_entry(curr_node, &sorted_list_head, list) {
-		int64_t local_total = curr_node->val;
-		num_bytes = sprintf(kern_buffer, "%lld\n", local_total);
-		my_count += num_bytes;
-		if(my_count > count) {
-			num_bytes = my_count - count;
-			ret = copy_to_user(buffer, kern_buffer, num_bytes);
+		num_bytes = sprintf(kern_buffer, "%lld\n", curr_node->val);
+		if((my_count + num_bytes) > count) {
+			num_bytes = my_count + num_bytes - count;
+			ret = copy_to_user(buffer + my_count, kern_buffer, num_bytes);
 			break;
 		}
-		ret = copy_to_user(buffer, kern_buffer, num_bytes);
+		ret = copy_to_user(buffer + my_count, kern_buffer, num_bytes);
+		my_count += num_bytes;
 	}
 	// spin_unlock(&state_lock);
 	kfree(kern_buffer);
@@ -268,8 +269,15 @@ static ssize_t proc_sorted_list_write(struct file *file,
 	} else {
 		list_for_each_entry(curr_node, &sorted_list_head, list) {
 			int curr_val = curr_node->val;
-			if(curr_val >= new_node->val)
+			if(curr_val >= new_node->val) { 
 				list_add_tail(&(new_node->list), &(curr_node->list));
+				break;
+			}
+			if((curr_node->list).next == &sorted_list_head) {
+				// not safe i know
+				list_add(&(new_node->list), &(curr_node->list));
+				break;
+			}	
 		}
 	}
 	spin_unlock(&state_lock);
