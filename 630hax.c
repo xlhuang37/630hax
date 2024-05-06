@@ -187,7 +187,7 @@ static ssize_t proc_sorted_list_read(struct file *filp, char __user *buffer,
 	struct sorted_node* curr_node;
 	char* kern_buffer = kmalloc(KERN_BUFFER_MAX, GFP_KERNEL);
 	// list_for_each_entry starts at the the entry pointed to by the supplied list_head
-	list_for_each_entry(curr_node, sorted_list_head, member) {
+	list_for_each_entry(curr_node, sorted_list_head, list) {
 		int local_total = curr_node->val;
 		
 		num_bytes = sprintf(kern_buffer, "%lld\n", local_total);
@@ -263,7 +263,6 @@ static ssize_t proc_sorted_list_write(struct file *file,
 
 	int64_t user_num;
 	sscanf(kern_buffer_user, "%lld", &user_num);
-	INIT_LIST_HEAD(new_node->list);
 	new_node->val = user_num;
 
 
@@ -271,10 +270,10 @@ static ssize_t proc_sorted_list_write(struct file *file,
 	struct sorted_node* curr_node;
 	char* kern_buffer = kmalloc(KERN_BUFFER_MAX, GFP_KERNEL);
 	// list_for_each_entry starts at the the entry pointed to by the supplied list_head
-	list_for_each_entry(curr_node, sorted_list_head, member) {
+	list_for_each_entry(curr_node, sorted_list_head, list) {
 		int curr_val = curr_node->val;
 		if(curr_val >= new_node->val)
-			list_add_tail(&new_node->list, curr_node->list);
+			list_add_tail(&new_node->list, &curr_node->list);
 	}
 
 	kfree(kern_buffer);
@@ -460,6 +459,12 @@ static void exit_630hax(void)
 	printk(KERN_ALERT "my uid procfs entry removed\n");
 
 	// Exercise 2: Your code here: Free list nodes
+	while(!list_empty(sorted_list_head)){
+		struct sorted_node* entry = list_first_entry(&sorted_list_head, node_to_delete, list);
+		list_del(entry->list);
+		kfree(entry);
+	}
+	kfree(sorted_list_head);
 }
 
 module_init(init_630hax);
