@@ -179,31 +179,28 @@ static ssize_t proc_sorted_list_read(struct file *filp, char __user *buffer,
 {
 	size_t my_count = 0;
 	int ret;
+	int num_bytes;
 
 	// Signal EOF if the offset is not zero
 	if (*offp) return 0;
-	spin_lock(&state_lock);
-	
-	struct sorted_node* curr_node;
+	// Outside such that no atomic problem
 	char* kern_buffer = kmalloc(KERN_BUFFER_MAX, GFP_KERNEL);
+	// spin_lock(&state_lock);
+	struct sorted_node* curr_node;
 	// list_for_each_entry starts at the the entry pointed to by the supplied list_head
-	list_for_each_entry(curr_node, sorted_list_head, list) {
-		int local_total = curr_node->val;
-		
+	list_for_each_entry(curr_node, &sorted_list_head, list) {
+		int64_t local_total = curr_node->val;
 		num_bytes = sprintf(kern_buffer, "%lld\n", local_total);
-
 		my_count += num_bytes;
 		if(my_count > count) {
 			num_bytes = my_count - count;
 			ret = copy_to_user(buffer, kern_buffer, num_bytes);
 			break;
 		}
-	
 		ret = copy_to_user(buffer, kern_buffer, num_bytes);
 	}
-
+	// spin_unlock(&state_lock);
 	kfree(kern_buffer);
-	spin_unlock(&state_lock);
 	*offp = 1;
 	return my_count;
 
@@ -251,33 +248,33 @@ static ssize_t proc_sorted_list_write(struct file *file,
 {
 	// Signal EOF if the offset is not zero
 	if (*offp) return 0;
-
-	spin_lock(&state_lock);
 	
 	// Create new Node
 	char* kern_buffer_user = kmalloc(KERN_BUFFER_MAX, GFP_KERNEL);
-	struct sorted_node* new_node = kmalloc(sizeof(struct sorted_node), GFP_KERNEL)
+	struct sorted_node* new_node = kmalloc(sizeof(struct sorted_node), GFP_KERNEL);
 	int ret = copy_from_user(kern_buffer_user, buffer, count);
-	if(ret < 0)
-		;
+	if(ret < 0){;}
 
 	int64_t user_num;
 	sscanf(kern_buffer_user, "%lld", &user_num);
 	new_node->val = user_num;
 
-
+	spin_lock(&state_lock);
 	// Deal with Insert
 	struct sorted_node* curr_node;
-	char* kern_buffer = kmalloc(KERN_BUFFER_MAX, GFP_KERNEL);
 	// list_for_each_entry starts at the the entry pointed to by the supplied list_head
-	list_for_each_entry(curr_node, sorted_list_head, list) {
-		int curr_val = curr_node->val;
-		if(curr_val >= new_node->val)
-			list_add_tail(&new_node->list, &curr_node->list);
+	if(list_empty(&sorted_list_head)){ 
+		list_add(&(new_node->list), &sorted_list_head);
+	} else {
+		list_for_each_entry(curr_node, &sorted_list_head, list) {
+			int curr_val = curr_node->val;
+			if(curr_val >= new_node->val)
+				list_add_tail(&(new_node->list), &(curr_node->list));
+		}
 	}
-
-	kfree(kern_buffer);
 	spin_unlock(&state_lock);
+
+
 	*offp = 1;
 	return count;
 	// Exercise 2: Your code here.
@@ -459,12 +456,11 @@ static void exit_630hax(void)
 	printk(KERN_ALERT "my uid procfs entry removed\n");
 
 	// Exercise 2: Your code here: Free list nodes
-	while(!list_empty(sorted_list_head)){
-		struct sorted_node* entry = list_first_entry(&sorted_list_head, node_to_delete, list);
-		list_del(entry->list);
+	while(!list_empty(&sorted_list_head)){
+		struct sorted_node* entry = list_first_entry(&sorted_list_head, struct sorted_node, list);
+		list_del(&(entry->list));
 		kfree(entry);
 	}
-	kfree(sorted_list_head);
 }
 
 module_init(init_630hax);
