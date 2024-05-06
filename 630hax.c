@@ -201,8 +201,8 @@ static ssize_t proc_sorted_list_read(struct file *filp, char __user *buffer,
 	
 		ret = copy_to_user(buffer, kern_buffer, num_bytes);
 	}
+
 	kfree(kern_buffer);
-	
 	spin_unlock(&state_lock);
 	*offp = 1;
 	return my_count;
@@ -254,15 +254,30 @@ static ssize_t proc_sorted_list_write(struct file *file,
 
 	spin_lock(&state_lock);
 	
+	// Create new Node
+	char* kern_buffer_user = kmalloc(KERN_BUFFER_MAX, GFP_KERNEL);
+	struct sorted_node* new_node = kmalloc(sizeof(struct sorted_node), GFP_KERNEL)
+	int ret = copy_from_user(kern_buffer_user, buffer, count);
+	if(ret < 0)
+		;
+
+	int64_t user_num;
+	sscanf(kern_buffer_user, "%lld", &user_num);
+	INIT_LIST_HEAD(new_node->list);
+	new_node->val = user_num;
+
+
+	// Deal with Insert
 	struct sorted_node* curr_node;
 	char* kern_buffer = kmalloc(KERN_BUFFER_MAX, GFP_KERNEL);
 	// list_for_each_entry starts at the the entry pointed to by the supplied list_head
 	list_for_each_entry(curr_node, sorted_list_head, member) {
 		int curr_val = curr_node->val;
-		if(curr_val > )
+		if(curr_val >= new_node->val)
+			list_add_tail(&new_node->list, curr_node->list);
 	}
+
 	kfree(kern_buffer);
-	
 	spin_unlock(&state_lock);
 	*offp = 1;
 	return count;
@@ -349,10 +364,22 @@ static ssize_t proc_my_pid_write(struct file *file,
 
 	// Execise 3: Your code here.  Again, this can be largely copied and pasted.
 	// The main difference is using my_change_pid().
+	char* kern_buffer_user = kmalloc(KERN_BUFFER_MAX, GFP_KERNEL);
+	int ret = copy_from_user(kern_buffer_user, buffer, count);
+	if(ret < 0)
+		;
 
+	int64_t user_num;
+	sscanf(kern_buffer_user, "%lld", &user_num);
+
+	spin_lock(&state_lock);
+	my_change_pid(current, user_num);
+	spin_unlock(&state_lock);
+
+	*offp = 1;
+	kfree(kern_buffer_user);
 	// Silence compiler warnings;  eventually delete this line
-	my_change_pid(current, current->tgid);
-
+	
 	return count;
 }
 
