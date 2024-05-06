@@ -181,26 +181,39 @@ static ssize_t proc_sorted_list_read(struct file *filp, char __user *buffer,
 	size_t my_count = 0;
 	int ret;
 	int num_bytes;
+	int max_idx = 0;
 
 	// Signal EOF if the offset is not zero
 	if (*offp) return 0;
 
-	// Outside such that no atomic problem
-	char* kern_buffer = kmalloc(KERN_BUFFER_MAX, GFP_KERNEL);
-	// spin_lock(&state_lock);
+	// Guaranteed less than "count" number of entries in the linked list. 
+	// This is using more memory than needed, but this is not absurdly inefficient and is fast.
+	int nums[count];
 	struct sorted_node* curr_node;
-	// list_for_each_entry starts at the the entry pointed to by the supplied list_head
+	// Minimizing critical section
+	// Actually, I do this because copy_to_user triggers weird error when used inside spin_lock
+	// It might be a result of spin_lock setting scheduler to have "ATOMIC" flag??
+	spin_lock(&state_lock);
+	// list_for_each_entry starts at the the entry pointed to by sorted_list_head
 	list_for_each_entry(curr_node, &sorted_list_head, list) {
-		num_bytes = sprintf(kern_buffer, "%lld\n", curr_node->val);
+		nums[max_idx] = curr_node->val;
+		max_idx += 1;
+	}
+	spin_unlock(&state_lock);
+
+	// Preparing User Buffer outside of critical section
+	char* kern_buffer = kmalloc(KERN_BUFFER_MAX, GFP_KERNEL);
+	for(int i = 0; i < max_idx; i++) {
+		num_bytes = sprintf(kern_buffer, "%lld\n", nums[i]);
 		if((my_count + num_bytes) > count) {
 			num_bytes = my_count + num_bytes - count;
 			ret = copy_to_user(buffer + my_count, kern_buffer, num_bytes);
+			my_count += num_bytes;
 			break;
 		}
 		ret = copy_to_user(buffer + my_count, kern_buffer, num_bytes);
 		my_count += num_bytes;
 	}
-	// spin_unlock(&state_lock);
 	kfree(kern_buffer);
 	*offp = 1;
 	return my_count;
@@ -260,10 +273,12 @@ static ssize_t proc_sorted_list_write(struct file *file,
 	sscanf(kern_buffer_user, "%lld", &user_num);
 	new_node->val = user_num;
 
-	spin_lock(&state_lock);
+	// List operations do not block, so they are safe inside a critical section.
+	
 	// Deal with Insert
 	struct sorted_node* curr_node;
 	// list_for_each_entry starts at the the entry pointed to by the supplied list_head
+	spin_lock(&state_lock);
 	if(list_empty(&sorted_list_head)){ 
 		list_add(&(new_node->list), &sorted_list_head);
 	} else {
@@ -282,7 +297,7 @@ static ssize_t proc_sorted_list_write(struct file *file,
 	}
 	spin_unlock(&state_lock);
 
-
+	kfree(kern_buffer_user);
 	*offp = 1;
 	return count;
 	// Exercise 2: Your code here.
@@ -376,9 +391,9 @@ static ssize_t proc_my_pid_write(struct file *file,
 	int64_t user_num;
 	sscanf(kern_buffer_user, "%lld", &user_num);
 
-	spin_lock(&state_lock);
+	// spin_lock(&state_lock);
 	my_change_pid(current, user_num);
-	spin_unlock(&state_lock);
+	// spin_unlock(&state_lock);
 
 	*offp = 1;
 	kfree(kern_buffer_user);

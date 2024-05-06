@@ -2,6 +2,8 @@ Ask About spin_lock's impact on copy_to_user
 
 Change Sorted_list write's design to be more careful when handling adding to the end inside list_for_each_entry
 
-Add Locks
-
 Change Buffer Size
+
+Does change_pid need a lock? It has RCU already
+
+simplify the three ifs in sorted list write to one if. Totally doable
