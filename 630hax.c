@@ -79,7 +79,7 @@ static ssize_t proc_running_total_read(struct file *filp, char __user *buffer,
 		return -EINVAL; // User memory not sufficient
 
 	ret = copy_to_user(buffer, kern_buffer, num_bytes);
-	// Partial Read is erroneous; Return an error;
+	// Partial write is erroneous; Return an error;
 	if(ret > 0) 
 		return -EFAULT;
 
@@ -201,7 +201,7 @@ static ssize_t proc_sorted_list_read(struct file *filp, char __user *buffer,
 	// Preparing User Buffer outside of critical section
 	for(int i = 0; i < max_idx; i++) {
 		// sprintf never fails because of KERN_BUFFER_MAX
-		// +1 to reflect null terminator
+		// +1 is for null terminator
 		num_bytes = sprintf(kern_buffer, "%lld\n", nums[i]) + 1;
 
 		// Handling Buffer Overflow
@@ -209,8 +209,10 @@ static ssize_t proc_sorted_list_read(struct file *filp, char __user *buffer,
 			return -EINVAL; // indicating user supplied memory not sufficient
 
 		ret = copy_to_user(buffer + my_count, kern_buffer, num_bytes);
+		// partial write is forbidden; 
+		// Rather not write than to write a wrong number
 		if(ret > 0)
-			return -EFAULT; // partial copy is forbidden; Most likely due to fault in user-supplied memory buffer
+			return -EFAULT; 
 
 		// my_count should exclude null terminator
 		// such that the next write overrides the null terminator
