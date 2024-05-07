@@ -141,6 +141,9 @@ static ssize_t proc_running_total_write(struct file *file,
 
 	*offp = 1;
 	kfree(kern_buffer_user);
+
+	// let's just lie to echo that we have consumed all bytes
+	// or echo is gonna try forever
 	return count;
 }
 
@@ -296,6 +299,9 @@ static ssize_t proc_sorted_list_write(struct file *file,
 
 	kfree(kern_buffer_user);
 	*offp = 1;
+
+	// let's just lie to echo that we have consumed all bytes
+	// or echo is gonna try forever
 	return count;
 }
 
@@ -387,6 +393,9 @@ static ssize_t proc_my_pid_write(struct file *file,
 
 	*offp = 1;
 	kfree(kern_buffer_user);
+
+	// let's just lie to echo that we have consumed all bytes
+	// or echo is gonna try forever
 	return count;
 }
 
