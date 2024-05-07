@@ -208,9 +208,12 @@ static ssize_t proc_sorted_list_read(struct file *filp, char __user *buffer,
 		ret = copy_to_user(buffer + my_count, kern_buffer, num_bytes);
 		if(ret > 0)
 			return -EFAULT; // partial copy is forbidden; Most likely due to fault in user-supplied memory buffer
+
 		// my_count should exclude null terminator
+		// such that the next write overrides the null terminator
 		my_count += num_bytes - 1;
 	}
+	my_count += 1; // take null terminator into consideration after all the writes
 
 	kfree(kern_buffer);
 	kfree(nums);
