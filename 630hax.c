@@ -33,6 +33,7 @@ struct sorted_node {
 static struct proc_dir_entry * running_total_entry;
 static struct proc_dir_entry * sorted_list_entry;
 static struct proc_dir_entry * my_pid_entry;
+int total_list_node = 0; 
 /**
  * Hook to read the running total.
  *
@@ -60,31 +61,31 @@ static ssize_t proc_running_total_read(struct file *filp, char __user *buffer,
 	// be able to return the entire contents of the "file" in one read()
 	// system call.  This is true for a single number, but may not be
 	// true in general.
-
-	// It seems that we are assuming that every time we call cat, the offp argument will always be 0?
-	// This makes sense if cat supplies its own offset variable and it starts reading at 0.
-	// Every time cat calls read, the offset will be updated.
-	// Just that in our case, we only allow it to read one time no matter what.
-	// ASK IN OFFICE HOUR
 	if (*offp) return 0;
 
-	// Exercise 1: Your code here
+	// Accessing total
 	spin_lock(&state_lock);
 	int64_t local_total = total;
 	spin_unlock(&state_lock);
 
 	char* kern_buffer = kmalloc(KERN_BUFFER_MAX, GFP_KERNEL);
-	num_bytes = sprintf(kern_buffer, "%lld\n", local_total);
-	// if(num_bytes < 0) {
-	// 	return num_bytes;
-	// }
-		
+	if(!kern_buffer)
+		return -ENOMEM;
+
+	// sprintf never fails thanks to KERN_BUFFER_MAX
+	// + 1 corresponds to null terminator
+	num_bytes = sprintf(kern_buffer, "%lld\n", local_total) + 1;
+	if (num_bytes > count) 
+		return -EINVAL; // User memory not sufficient
+
 	ret = copy_to_user(buffer, kern_buffer, num_bytes);
-	// if(ret) { 
-	// 	return ret;
-	// }
+	// Partial Read is erroneous; Return an error;
+	if(ret > 0) 
+		return -EFAULT;
 
 	*offp = 1; // Assuming it always finishes in one call. What if it does not? I don't care!
+
+	// freeing memory
 	kfree(kern_buffer);
 	return num_bytes;
 }
@@ -121,27 +122,18 @@ static ssize_t proc_running_total_write(struct file *file,
 	// Which has to relate to the logic how this pipe writing works.
 	if (*offp) return 0;
 
-	// Exercise 1: Your code here:
-	//
-	// As with the read hook, allocate a kernel buffer, and copy
-	// the data from userspace before trying to convert to an
-	// integer.  Then add the integer to the running total.
-	//
-	// Hints: copy_from_user and sscanf may be helpful.
-
-	// Here we can assume that, in the absence of errors,
-	// we consume all the bytes written in one call.
-	// Then, use copy_to_user to copy the contents of
-	// the buffer to the user-provided buffer.  In general,
-	// kernel code ought not work directly on user memory,
-	// which could be a bad pointer or changed by another user thread.
 	char* kern_buffer_user = kmalloc(KERN_BUFFER_MAX, GFP_KERNEL);
+	if(!kern_buffer_user)
+		return -ENOMEM;
+
 	int ret = copy_from_user(kern_buffer_user, buffer, count);
-	if(ret < 0)
-		;
+	if(ret > 0)
+		return -EINVAL; // Partial read should be forbidden;
 
 	int64_t user_num;
-	sscanf(kern_buffer_user, "%lld", &user_num);
+	ret = sscanf(kern_buffer_user, "%lld", &user_num);
+	if(ret < 0)
+		return ret;
 
 	spin_lock(&state_lock);
 	total = user_num + total;
@@ -182,14 +174,16 @@ static ssize_t proc_sorted_list_read(struct file *filp, char __user *buffer,
 	int ret;
 	int num_bytes;
 	int max_idx = 0;
+	struct sorted_node* curr_node;
 
 	// Signal EOF if the offset is not zero
 	if (*offp) return 0;
 
-	// Guaranteed less than "count" number of entries in the linked list. 
-	// This is using more memory than needed, but this is not absurdly inefficient and is fast.
-	int nums[count];
-	struct sorted_node* curr_node;
+	int64_t* nums = kmalloc(total_list_node * sizeof(int64_t), GFP_KERNEL);
+	char* kern_buffer = kmalloc(KERN_BUFFER_MAX, GFP_KERNEL);
+	if(!nums || !kern_buffer)
+		return -ENOMEM;
+	
 	// Minimizing critical section
 	// Actually, I do this because copy_to_user triggers weird error when used inside spin_lock
 	// It might be a result of spin_lock setting scheduler to have "ATOMIC" flag??
@@ -202,19 +196,24 @@ static ssize_t proc_sorted_list_read(struct file *filp, char __user *buffer,
 	spin_unlock(&state_lock);
 
 	// Preparing User Buffer outside of critical section
-	char* kern_buffer = kmalloc(KERN_BUFFER_MAX, GFP_KERNEL);
 	for(int i = 0; i < max_idx; i++) {
-		num_bytes = sprintf(kern_buffer, "%lld\n", nums[i]);
-		if((my_count + num_bytes) > count) {
-			num_bytes = my_count + num_bytes - count;
-			ret = copy_to_user(buffer + my_count, kern_buffer, num_bytes);
-			my_count += num_bytes;
-			break;
-		}
+		// sprintf never fails because of KERN_BUFFER_MAX
+		// +1 to reflect null terminator
+		num_bytes = sprintf(kern_buffer, "%lld\n", nums[i]) + 1;
+
+		// Handling Buffer Overflow
+		if((my_count + num_bytes) > count) 
+			return -EINVAL; // indicating user supplied memory not sufficient
+
 		ret = copy_to_user(buffer + my_count, kern_buffer, num_bytes);
-		my_count += num_bytes;
+		if(ret > 0)
+			return -EFAULT; // partial copy is forbidden; Most likely due to fault in user-supplied memory buffer
+		// my_count should exclude null terminator
+		my_count += num_bytes - 1;
 	}
+
 	kfree(kern_buffer);
+	kfree(nums);
 	*offp = 1;
 	return my_count;
 
@@ -266,11 +265,17 @@ static ssize_t proc_sorted_list_write(struct file *file,
 	// Create new Node
 	char* kern_buffer_user = kmalloc(KERN_BUFFER_MAX, GFP_KERNEL);
 	struct sorted_node* new_node = kmalloc(sizeof(struct sorted_node), GFP_KERNEL);
+	if(!kern_buffer_user || !new_node)
+		return -ENOMEM;
+
 	int ret = copy_from_user(kern_buffer_user, buffer, count);
-	if(ret < 0){;}
+	if(ret > 0)
+		return -EFAULT; // partial read is forbidden
 
 	int64_t user_num;
-	sscanf(kern_buffer_user, "%lld", &user_num);
+	ret = sscanf(kern_buffer_user, "%lld", &user_num);
+	if(ret < 0)
+		return ret;
 	new_node->val = user_num;
 
 	// List operations do not block, so they are safe inside a critical section.
@@ -289,12 +294,12 @@ static ssize_t proc_sorted_list_write(struct file *file,
 				break;
 			}
 			if((curr_node->list).next == &sorted_list_head) {
-				// not safe i know
 				list_add(&(new_node->list), &(curr_node->list));
 				break;
-			}	
+			}
 		}
 	}
+	total_list_node += 1;
 	spin_unlock(&state_lock);
 
 	kfree(kern_buffer_user);
@@ -384,21 +389,23 @@ static ssize_t proc_my_pid_write(struct file *file,
 	// Execise 3: Your code here.  Again, this can be largely copied and pasted.
 	// The main difference is using my_change_pid().
 	char* kern_buffer_user = kmalloc(KERN_BUFFER_MAX, GFP_KERNEL);
+	if(!kern_buffer_user)
+		return -ENOMEM;
+
 	int ret = copy_from_user(kern_buffer_user, buffer, count);
-	if(ret < 0)
-		;
+	if(ret > 0)
+		return -EFAULT; // partial read is forbidden
 
 	int64_t user_num;
-	sscanf(kern_buffer_user, "%lld", &user_num);
+	ret = sscanf(kern_buffer_user, "%lld", &user_num);
+	if(ret < 0)
+		return ret;
 
-	// spin_lock(&state_lock);
+	// Lock Unnecessary, RCU lock already used
 	my_change_pid(current, user_num);
-	// spin_unlock(&state_lock);
 
 	*offp = 1;
 	kfree(kern_buffer_user);
-	// Silence compiler warnings;  eventually delete this line
-	
 	return count;
 }
 
@@ -483,7 +490,10 @@ static void exit_630hax(void)
 		struct sorted_node* entry = list_first_entry(&sorted_list_head, struct sorted_node, list);
 		list_del(&(entry->list));
 		kfree(entry);
+		total_list_node -= 1;
 	}
+	// total_list_node equals 0 on success
+	printk(KERN_ALERT "Confirming all list_node removed: %d\n", total_list_node);
 }
 
 module_init(init_630hax);
