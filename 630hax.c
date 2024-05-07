@@ -216,17 +216,6 @@ static ssize_t proc_sorted_list_read(struct file *filp, char __user *buffer,
 	kfree(nums);
 	*offp = 1;
 	return my_count;
-
-	// Exercise 2: Your code here.
-	//
-	// Much of the code from proc_running_total_read() can be
-	// copied here.  Instead of writing a single integer into the
-	// user provided buffer, you will write a series of integers.
-	//
-	// You may find the helper functions in include/linux/list.h helpful,
-	// such as list_for_each_entry().
-	//
-	// As before, be cognizant of concurrency and use a lock
 }
 
 /**
@@ -305,17 +294,6 @@ static ssize_t proc_sorted_list_write(struct file *file,
 	kfree(kern_buffer_user);
 	*offp = 1;
 	return count;
-	// Exercise 2: Your code here.
-	//
-	// Much of the code from proc_running_total_write() can be
-	// copied here.  Just like before, you will read a single integer in,
-	// but rather than add it to a total, you will place it in the list,
-	// in the correct position in the list.
-	//
-	// You may find the helper functions in include/linux/list.h helpful,
-	// such as list_for_each_entry() and list_add_tail().
-	//
-	// As before, be cognizant of concurrency and use a lock
 }
 
 /* Helper code borrowed form Linux because it is not exported as a
